@@ -16,3 +16,6 @@ dependencies = [
     "pydantic-settings==2.3.4",
     "python-multipart==0.0.9",
 ]
+
+[tool.fastapi]
+entrypoint = "app.main:app"
