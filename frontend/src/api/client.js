@@ -1,7 +1,8 @@
 import axios from 'axios'
 
-// In Docker, the frontend is served by nginx which proxies /api to the backend.
-// In local dev (vite), VITE_API_URL can override this.
+// On Vercel, VITE_API_URL is set to the FastAPI Cloud backend URL (e.g.
+// https://your-backend-app.fastapicloud.dev/api). In local dev without it
+// set, requests fall back to a relative /api path.
 const baseURL = import.meta.env.VITE_API_URL || '/api'
 
 const client = axios.create({ baseURL })
