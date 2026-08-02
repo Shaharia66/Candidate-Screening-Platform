@@ -2,7 +2,19 @@
 
 A full-stack web application that lets recruiters post and manage jobs, and lets candidates browse open roles, apply, and track their application status — built as a Python full-stack developer assessment.
 
-**Stack:** FastAPI (Python) · React (Vite) · MySQL 8 · Docker & Docker Compose
+**Stack:** FastAPI (Python) · React (Vite) · MySQL · Render · Netlify · Aiven
+
+## 🌐 Live Demo
+
+| | |
+|---|---|
+| **Frontend (live app)** | https://candidate-screening-platform.netlify.app |
+| **Backend API** | https://candidate-screening-platform-tosb.onrender.com |
+| **API Docs (Swagger)** | https://candidate-screening-platform-tosb.onrender.com/docs |
+
+📘 **See [USER_GUIDE.md](./USER_GUIDE.md)** for step-by-step instructions on using the platform as a recruiter or as a candidate.
+
+> **Note:** the backend runs on Render's free tier, which spins down after inactivity. The first request after idle time may take up to ~50 seconds to respond while it wakes up — subsequent requests are fast.
 
 ---
 
@@ -28,18 +40,17 @@ A full-stack web application that lets recruiters post and manage jobs, and lets
 ## 2. Architecture
 
 ```
-┌────────────┐        HTTP (JSON)        ┌────────────┐        SQL         ┌───────────┐
-│   React    │ ─────────────────────────▶│  FastAPI   │ ───────────────────▶│  MySQL 8  │
-│  (Vite +   │◀───────────────────────── │  (REST API)│◀───────────────────│           │
-│  nginx)    │       JWT in header        └────────────┘                     └───────────┘
-└────────────┘
+┌──────────────┐        HTTPS (JSON)       ┌──────────────┐        SQL (SSL)      ┌───────────────┐
+│    React     │ ─────────────────────────▶│   FastAPI    │ ──────────────────────▶│  MySQL (Aiven) │
+│  (Netlify)   │◀───────────────────────── │   (Render)   │◀────────────────────── │                │
+└──────────────┘       JWT in header        └──────────────┘                        └───────────────┘
 ```
 
-- **Frontend** is a single-page React app (React Router for navigation), built with Vite and served via nginx in production. nginx also reverse-proxies `/api/*` requests to the backend container, so the browser only ever talks to one origin.
-- **Backend** is a FastAPI REST API. SQLAlchemy ORM models map to MySQL tables. Recruiter authentication uses JWT bearer tokens (passwords hashed with bcrypt).
-- **Database** is MySQL 8, running in its own container with a persistent volume.
+- **Frontend** is deployed to **Netlify** as a static site built with Vite. It talks to the backend over HTTPS using the `VITE_API_URL` environment variable.
+- **Backend** is deployed to **Render** as a Docker-based Web Service, built directly from `backend/Dockerfile`. SQLAlchemy ORM models map to MySQL tables. Recruiter authentication uses JWT bearer tokens (passwords hashed with bcrypt).
+- **Database** is a managed **MySQL instance on Aiven** (free tier), which enforces SSL-only connections — the backend uses a CA certificate (`backend/ca.pem`) to connect securely.
 
-All three services are orchestrated with Docker Compose — one command starts the whole stack.
+Each piece is a separate deployed service — there's no shared network between them, so all communication happens over public HTTPS URLs configured via environment variables.
 
 ---
 
@@ -84,42 +95,34 @@ Tables are created automatically on backend startup via `SQLAlchemy.metadata.cre
 
 ---
 
-## 4. Getting Started (Docker — recommended)
+## 4. Running Locally (Docker)
 
-**Prerequisites:** Docker and Docker Compose installed. Nothing else.
+While the live version runs on Render/Netlify/Aiven, the project also runs fully locally via Docker for development/testing.
+
+**Prerequisites:** Docker and Docker Compose installed.
 
 ```bash
-# 1. Clone/unzip the project, then from the project root:
 cp .env.example .env
-
-# 2. Build and start everything
 docker-compose up --build
 ```
 
-Once containers are up:
-- **Frontend:** http://localhost:3000
-- **Backend API:** http://localhost:8000
-- **Interactive API docs (Swagger UI):** http://localhost:8000/docs
+- Frontend: http://localhost:3000
+- Backend API docs: http://localhost:8000/docs
 
-The backend automatically retries its database connection on startup, so it's fine that MySQL takes a few seconds longer to become ready.
-
-To stop everything:
+To stop:
 ```bash
 docker-compose down          # stop containers
-docker-compose down -v       # stop and wipe the database volume
+docker-compose down -v       # stop and wipe the local database volume
 ```
 
-### Running without Docker (optional, for local development)
+### Running without Docker (backend + frontend separately)
 
 **Backend:**
 ```bash
 cd backend
 python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-
-# point at a local MySQL instance via environment variables, e.g.:
 export DB_HOST=localhost DB_USER=root DB_PASSWORD=yourpassword DB_NAME=screening_platform
-
 uvicorn app.main:app --reload
 ```
 
@@ -127,14 +130,14 @@ uvicorn app.main:app --reload
 ```bash
 cd frontend
 npm install
-npm run dev   # runs on http://localhost:5173, proxies API calls to VITE_API_URL if set
+npm run dev
 ```
 
 ---
 
 ## 5. API Reference
 
-Full interactive docs are auto-generated at `/docs` (Swagger) and `/redoc`. Summary below.
+Full interactive docs: https://candidate-screening-platform-tosb.onrender.com/docs
 
 ### Auth
 | Method | Endpoint | Auth | Description |
@@ -168,12 +171,13 @@ Recruiter-only endpoints require an `Authorization: Bearer <token>` header, obta
 
 ## 6. Key Design Decisions & Assumptions
 
-- **Candidates don't have accounts.** The brief only requires candidates to apply, submit a resume URL, and track status — not manage a profile. Requiring signup would add friction real job boards try to avoid, so candidates are identified only by the email they apply with, and track status via an email lookup. This is called out explicitly since it's a deliberate scope decision, not an oversight.
-- **Resume is a URL, not a file upload**, exactly as specified in the assessment brief — this avoids needing file storage infrastructure (e.g. S3) within the time box.
-- **JWT auth for recruiters only.** Recruiter actions (creating/editing/closing jobs, changing application status) are sensitive and gated behind login; candidate actions are intentionally frictionless.
+- **Candidates don't have accounts.** The brief only requires candidates to apply, submit a resume URL, and track status — not manage a profile. Candidates are identified only by the email they apply with, and track status via an email lookup.
+- **Resume is a URL, not a file upload**, exactly as specified in the assessment brief.
+- **JWT auth for recruiters only.** Recruiter actions are sensitive and gated behind login; candidate actions are intentionally frictionless.
 - **Duplicate applications are blocked** — the same email can't apply to the same job twice.
 - **A closed job stops accepting new applications** (enforced server-side, not just hidden in the UI).
 - **Ownership checks:** a recruiter can only edit/close/review jobs and applications they created (returns `403` otherwise).
+- **SSL-secured database connection.** Aiven's managed MySQL enforces SSL-only connections; the backend loads a CA certificate (`backend/ca.pem`) via the `DB_SSL_CA` environment variable to connect securely — see `backend/app/database.py`.
 
 ---
 
@@ -185,7 +189,8 @@ Recruiter-only endpoints require an `Authorization: Bearer <token>` header, obta
 - Pagination and search/filtering on the jobs and applications lists
 - Email notifications when application status changes
 - Rate limiting on public endpoints (application submission, login)
-- Role-based access if candidate accounts were added later
+- Tighten CORS to the exact frontend origin instead of `*`
+- A custom domain instead of the default Render/Netlify subdomains
 
 ---
 
@@ -196,7 +201,7 @@ candidate-screening-platform/
 ├── backend/
 │   ├── app/
 │   │   ├── main.py            # FastAPI app, startup, CORS
-│   │   ├── database.py        # SQLAlchemy engine/session
+│   │   ├── database.py        # SQLAlchemy engine/session (SSL-aware)
 │   │   ├── models.py          # ORM models (User, Job, Application)
 │   │   ├── schemas.py         # Pydantic request/response schemas
 │   │   ├── auth.py            # JWT + password hashing
@@ -205,27 +210,35 @@ candidate-screening-platform/
 │   │       ├── auth.py
 │   │       ├── jobs.py
 │   │       └── applications.py
+│   ├── ca.pem                 # Aiven MySQL CA certificate (SSL)
 │   ├── requirements.txt
 │   └── Dockerfile
 ├── frontend/
 │   ├── src/
-│   │   ├── pages/               # One component per route
-│   │   ├── components/          # Layouts, shared UI (status tags, guards)
-│   │   ├── context/              # AuthContext (JWT/session state)
-│   │   ├── api/client.js        # Axios instance with auth interceptor
-│   │   ├── App.jsx              # Route definitions
-│   │   └── index.css            # Design tokens + global styles
-│   ├── nginx.conf
+│   │   ├── pages/              # One component per route
+│   │   ├── components/         # Layouts, shared UI (status tags, guards)
+│   │   ├── context/             # AuthContext (JWT/session state)
+│   │   ├── api/client.js       # Axios instance with auth interceptor
+│   │   ├── App.jsx             # Route definitions
+│   │   └── index.css           # Design tokens + global styles
+│   ├── public/_redirects       # Netlify SPA routing fallback
+│   ├── nginx.conf              # Used only for local Docker builds
 │   └── Dockerfile
-├── docker-compose.yml
+├── docker-compose.yml           # Local development only
+├── netlify.toml                 # Netlify build configuration
+├── USER_GUIDE.md                 # How to use the platform (recruiter & candidate)
 ├── .env.example
 └── README.md
 ```
 
 ---
 
-## 9. Deploying for Free (optional)
+## 9. Deployment (how the live version is actually hosted)
 
-- **Frontend:** deploy the `frontend/` folder to **Vercel** or **Netlify** (both free, permanent).
-- **Backend + MySQL:** deploy the repo to **Railway**, which can build directly from `docker-compose.yml` — runs on free trial credits, sufficient to demo this project.
-- Set `VITE_API_URL` in the frontend's environment to point at the deployed backend URL, and update backend `CORS` origins accordingly.
+| Piece | Platform | Notes |
+|---|---|---|
+| Database | **Aiven** (MySQL, free tier) | SSL-required connection via `ca.pem` |
+| Backend | **Render** (free Web Service, Docker) | Builds from `backend/Dockerfile`; auto-restarts on push to `master` |
+| Frontend | **Netlify** (free static site) | Builds from `frontend/` via `netlify.toml`; `VITE_API_URL` points to the Render backend |
+
+To redeploy after code changes, just push to GitHub — both Render and Netlify auto-deploy on push to `master`.
