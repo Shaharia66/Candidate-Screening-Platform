@@ -27,13 +27,18 @@ def wait_for_db_and_create_tables(retries: int = 10, delay: int = 3):
     MySQL inside Docker can take a few seconds to accept connections after
     the container starts. Retry table creation instead of failing immediately.
     """
+    last_error = None
     for attempt in range(retries):
         try:
             Base.metadata.create_all(bind=engine)
             return
-        except OperationalError:
+        except OperationalError as e:
+            last_error = e
+            print(f"[startup] DB connection attempt {attempt + 1}/{retries} failed: {e}")
             time.sleep(delay)
-    raise RuntimeError("Could not connect to the database after multiple retries.")
+    raise RuntimeError(
+        f"Could not connect to the database after {retries} retries. Last error: {last_error}"
+    )
 
 
 @app.on_event("startup")
@@ -49,3 +54,4 @@ app.include_router(applications.router)
 @app.get("/api/health", tags=["Health"])
 def health_check():
     return {"status": "ok"}
+    
